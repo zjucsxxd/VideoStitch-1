@@ -165,7 +165,6 @@ static int VideoStitch(int argc, char* argv[])
 		captures.resize(video_num);
 		for(int i = 0; i < video_num; i++)
 		{
-			cout << "wanglingyusima " << video_names[i] << endl;
 			captures[i].open(video_names[i]);
 			if(!captures[i].isOpened())
 			{

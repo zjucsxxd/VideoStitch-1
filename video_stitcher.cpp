@@ -148,6 +148,7 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 	ofstream log_file;
 	if(is_debug_)
 		log_file.open(debug_dir_path_ + log_file_name);
+	long long startTime = clock();
 	while(true)
 	{
 		long frame_time = 0;
@@ -220,6 +221,8 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 			imshow(window_name, show_dst);
 		}
 	}
+	long long endTime = clock();
+	cout << "test " << endTime - startTime << endl;
 	cout << "\nStitch over" << endl;
 	cout << failed_frame_count << " frames failed." << endl;
 	cout << "\tfull view angle is " << cvRound(view_angle_) << "бу" << endl;
