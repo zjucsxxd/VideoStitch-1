@@ -17,6 +17,7 @@
 
 #include "blender.h"
 #include "exposure_compensator.h"
+#include <windows.h>
 
 using namespace std;
 using namespace cv;
@@ -60,7 +61,7 @@ public:
 
 	void setPreview(bool is_preview) { is_preview_ = is_preview; };
 	void setSave(bool is_save) { is_save_video_ = is_save; };
-	void setRange(int start, int end = -1) { start_frame_index_ = std::max(1, start) - 1; end_frame_index_ = end; };
+	void setRange(int start, int end = -1) { start_frame_index_ = (std::max)(1, start) - 1; end_frame_index_ = end; };
 	void setTryGPU(bool try_gpu) { is_try_gpu_ = try_gpu; };
 	void setTrim(bool is_trim) {
 		if(is_trim)
@@ -69,15 +70,18 @@ public:
 			trim_type_ = MyVideoStitcher::TRIM_NO;
 	};
 	void setTrim(Rect trim_rect) { trim_rect_ = trim_rect; trim_type_ = MyVideoStitcher::TRIM_RECTANGLE; };
-	void setWarpType(string warp_type) { warp_type_ = warp_type; };
+	void setWarpType(string warp_type) { warp_type_ = warp_type;};
 
 	int stitch(vector<VideoCapture> &captures, string &writer_file_name);
 	int stitchImage(vector<Mat> &src, Mat &pano);
+	int StitchFrame(vector<Mat> &src, Mat &dst);
 
 	void setDebugDirPath(string dir_path);
 
 	void saveCameraParam(string filename);
 	int loadCameraParam(string filename);
+
+	int getEndFrameIndex() {return end_frame_index_;}
 
 protected:
 
@@ -86,7 +90,6 @@ private:
 	int Prepare(vector<Mat> &src);
 	int PrepareAPAP(vector<Mat> &src);
 	int PrepareClassical(vector<Mat> &src);
-	int StitchFrame(vector<Mat> &src, Mat &dst);
 	int StitchFrameCPU(vector<Mat> &src, Mat &dst);
 	int StitchFrameGPU(vector<Mat> &src, Mat &dst);
 
@@ -210,7 +213,6 @@ private:
 
 	/* Debug */
 	string debug_dir_path_;
-
 };
 
 
@@ -222,4 +224,5 @@ typedef struct frameInfo_
 	int stitch_status;
 }FrameInfo;
 
+extern MyVideoStitcher video_stitcher;
 #endif

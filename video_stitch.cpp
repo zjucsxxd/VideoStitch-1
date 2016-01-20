@@ -35,6 +35,8 @@ static void printUsage()
 		"    --cp camera_param_path	使用camera_param_path的摄像机参数\n";
 }
 
+MyVideoStitcher video_stitcher;
+
 static bool is_camera = false, is_view = false, is_save = false, is_debug = false;
 static int cam_width, cam_height, cam_num;
 static vector<string> video_names;
@@ -126,14 +128,10 @@ static int parseCmdArgs(int argc, char* argv[])
 //	VideoStitch --camera 5 1280 720 -v -gpu --debug data/tmp/ --cp data/tmp/camera_param_5.dat
 static int VideoStitch(int argc, char* argv[])
 {
-	for(int i = 0; i < argc; i++)
-		printf("%s\n", argv[i]);
 	int retval = parseCmdArgs(argc, argv);
 	if(retval)
 		return retval;
-
-	for(int i = 0; i < video_names.size(); i++)
-		cout << video_names[i] << endl;
+	 
 
 	//	输入视频流
 	vector<VideoCapture> captures;
@@ -165,7 +163,6 @@ static int VideoStitch(int argc, char* argv[])
 		captures.resize(video_num);
 		for(int i = 0; i < video_num; i++)
 		{
-			cout << "wanglingyusima " << video_names[i] << endl;
 			captures[i].open(video_names[i]);
 			if(!captures[i].isOpened())
 			{
@@ -176,8 +173,6 @@ static int VideoStitch(int argc, char* argv[])
 		}
 	}
 	cout << "Video capture success" << endl;
-
-	MyVideoStitcher video_stitcher;
 
 	//	显示/保存
 	video_stitcher.setPreview(is_view);
@@ -209,7 +204,10 @@ static int VideoStitch(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
+	long start_clock = clock();
 	VideoStitch(argc, argv);
+	long end_clock = clock();
+	cout << "time " << end_clock - start_clock << endl;
 	system("pause");
 	return 0;
 }

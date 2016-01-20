@@ -46,6 +46,65 @@ MyVideoStitcher::MyVideoStitcher()
 	parallel_num_ = sys_info.dwNumberOfProcessors;
 }
 
+VideoWriter writer;
+queue<FrameInfo> images;
+queue<Mat> ans;
+bool captureFinish = false;
+bool stitchFinish = false;
+
+DWORD WINAPI captureFrame(LPVOID lpParameter) {
+	vector<VideoCapture> captures = *(vector<VideoCapture>*)lpParameter;
+	int frameIndex = 0;
+	while(true) {
+		while(images.size() >= 10)
+			Sleep(100);
+		int i = 0;
+		Mat frame;
+		FrameInfo frame_info;
+		frame_info.src.resize(captures.size());
+		for(i = 0; i < captures.size(); i++) {
+			if(!captures[i].read(frame)) 
+				break;
+			frame.copyTo(frame_info.src[i]);
+		}
+		frame_info.frame_idx = frameIndex;
+		frameIndex++;
+		images.push(frame_info);
+		if(i != captures.size() || (video_stitcher.getEndFrameIndex() > 0 && frameIndex > video_stitcher.getEndFrameIndex())) {
+			captureFinish = true;
+			break;
+		}
+	}
+	return 0;
+}
+
+DWORD WINAPI stitchFrame(LPVOID lpParameter) {
+	while(!images.empty() || !captureFinish) {
+		while(images.empty() && !captureFinish)
+			Sleep(100);
+		FrameInfo frame_info = images.front();
+		images.pop();
+		frame_info.stitch_status = video_stitcher.StitchFrame(frame_info.src, frame_info.dst);
+		while(ans.size() >= 10)
+			Sleep(100);
+		ans.push(frame_info.dst);
+	}
+	stitchFinish = true;
+	return 0;
+}
+
+DWORD WINAPI writeFrame(LPVOID lpParameter) {
+	while(!ans.empty() || !stitchFinish) {
+		while(ans.empty() && !stitchFinish) {
+			Sleep(100);
+		}
+		Mat cur = ans.front();
+		ans.pop();
+		writer.write(cur);
+	}	
+	return 0;
+}
+
 int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file_name )
 {
 	int video_num = captures.size();
@@ -113,7 +172,6 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 	}
 
 	// 创建结果视频
-	VideoWriter writer;
 	if(is_save_video_)
 	{
 		writer.open(writer_file_name, CV_FOURCC('D', 'I','V', '3'), 20, Size(dst.cols, dst.rows));
@@ -148,6 +206,7 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 	ofstream log_file;
 	if(is_debug_)
 		log_file.open(debug_dir_path_ + log_file_name);
+	/*
 	while(true)
 	{
 		long frame_time = 0;
@@ -199,6 +258,7 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 			}
 			long write_start_clock = clock();
 			writer.write(frame_info.dst);
+			
 			long write_clock = clock();
 			cout << write_clock - write_start_clock << "ms)";
 			frame_time += write_clock - write_start_clock;
@@ -220,12 +280,26 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 			imshow(window_name, show_dst);
 		}
 	}
+	*/
+	HANDLE hCapture = CreateThread(NULL, 0, captureFrame, (LPVOID)&captures, 0, NULL);
+	HANDLE hStitch = CreateThread(NULL, 0, stitchFrame, NULL, 0, NULL);
+	HANDLE hWrite;
+	if(is_save_video_) {
+		hWrite = CreateThread(NULL,0, writeFrame, NULL, 0, NULL);
+	}
+	//CloseHandle(hCapture);
+	//CloseHandle(hStitch);
+	WaitForSingleObject(hCapture, INFINITE);
+	WaitForSingleObject(hStitch, INFINITE);
+	if(is_save_video_)
+		WaitForSingleObject(hWrite, INFINITE);
+	
 	cout << "\nStitch over" << endl;
 	cout << failed_frame_count << " frames failed." << endl;
 	cout << "\tfull view angle is " << cvRound(view_angle_) << "°" << endl;
 	if(is_debug_)
 		log_file << "\tfull view angle is " << cvRound(view_angle_) << "°" << endl;
-	writer.release();
+	//writer.release();
 
 	cout << "\ton average: stitch time = " << stitch_time / (frameidx-1) << "ms" << endl;
 	cout << "\tcenter: (" << -dst_roi_.x << ", " << -dst_roi_.y << ")" << endl;
@@ -418,10 +492,13 @@ double MyVideoStitcher::GetViewAngle(vector<Mat> &src, vector<CameraParams> &cam
 		Mat_<float> K;
 		cameras[i].K().convertTo(K, CV_32F);
 		Rect roi = warper->warpRoi(Size(src[i].cols * work_scale_, src[i].rows * work_scale_), K, cameras[i].R);
+		cout << "src[i].cols work_scale " << src[i].cols << " " << work_scale_ << endl;
+		cout << "roi.tl() " << roi.tl() << endl;
 		corners.push_back(roi.tl());
 		sizes.push_back(roi.size());
 	}
 	Rect result_roi = resultRoi(corners, sizes);
+	cout << "result_roi.width median_focal_len_ " << result_roi.width << " " << median_focal_len_ << endl;
 	double view_angle = result_roi.width * 180.0 / (median_focal_len_  * CV_PI);
 	return view_angle;
 }
@@ -483,20 +560,21 @@ int MyVideoStitcher::WarpForSeam(vector<Mat> &src, vector<CameraParams> &cameras
 			img = src[i].clone();
 		else
 			resize(src[i], img, Size(), seam_scale_, seam_scale_);
-
 		mask.create(img.size(), CV_8U);
 		mask.setTo(Scalar::all(255));
 		Mat tmp_mask_warped, tmp_img_warped;
 		Point tmp_corner;
 		Size tmp_size;
 		warper->warp(mask, K, cameras[i].R, INTER_NEAREST, BORDER_CONSTANT, tmp_mask_warped);
+		cout << "tmp_mask_warped.size() " << tmp_mask_warped.size() << endl; 
 
 		//	考虑360度拼接的特殊情况
 		tmp_corner = warper->warp(img, K, cameras[i].R, INTER_LINEAR, BORDER_REFLECT, tmp_img_warped);
+		cout << "full_pano_width " << full_pano_width << endl;
 		//cout << "warped width = " << tmp_mask_warped.cols << ", pano width = " << full_pano_width << endl;
 		if(abs(tmp_mask_warped.cols - full_pano_width) <= 10)
 		{
-			int x1, x2;
+			int x1 = 0, x2 = 0;
 			FindWidestInpaintRange(tmp_mask_warped, x1, x2);
 			Mat mask1, mask2, img1, img2;
 			Rect rect1(0, 0, x1, tmp_mask_warped.rows), rect2(x2+1, 0, tmp_mask_warped.cols-1-x2, tmp_mask_warped.rows);
@@ -542,7 +620,7 @@ int MyVideoStitcher::FindWidestInpaintRange(Mat mask, int &x1, int &x2)
 			if(mask_ptr[y * mask.cols + x] != 0)
 				sum_row[x] = 1;
 
-	int cur_x1, cur_x2, max_range = 0;
+	int cur_x1 = 0, cur_x2 = 0, max_range = 0;
 	for(int x = 1; x < mask.cols; x++)	//	最左边肯定是1
 	{
 		if(sum_row[x - 1] == 1 && sum_row[x] == 0)
@@ -1039,6 +1117,7 @@ int MyVideoStitcher::PrepareClassical(vector<Mat> &src)
 	//	计算水平视角，判定平面投影的合法性
 	LOGLN("\t~calculating view angle...");
 	view_angle_ = this->GetViewAngle(src, cameras_);
+	cout << "view_angle " << view_angle_ << endl;
 	if(view_angle_ > 140 && warp_type_ == "plane")
 		warp_type_ = "cylindrical";
 
@@ -1047,7 +1126,7 @@ int MyVideoStitcher::PrepareClassical(vector<Mat> &src)
 	vector<Mat> masks_warped;
 	vector<Mat> images_warped;
 	this->WarpForSeam(src, cameras_, masks_warped, images_warped);
-
+	
 	// 曝光补偿
 	LOGLN("\t~compensating...");
 	compensator_.createWeightMaps(corners_, images_warped, masks_warped, ec_weight_maps_);
