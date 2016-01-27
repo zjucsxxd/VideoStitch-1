@@ -81,23 +81,98 @@ DWORD WINAPI captureFrame(LPVOID lpParameter) {
 	return 0;
 }
 
+int windowHeight = 0;
+int windowWidth = 0;
+int centerX = 0;
+int centerY = 0;
+int showWidth = 0;
+int showHeight = 0;
+int moveX = 0;
+int moveY = 0;
+int frame_time = 0;
+int frame_show_interval = 0;
+double show_scale = 1;
+double scale_interval = 0.03;
+string window_name = "视频拼接";
+bool writeVideo = false;
+
 DWORD WINAPI stitchFrame(LPVOID lpParameter) {
 	pyramidImages.resize(LAYERS);
+	namedWindow(window_name);
 	while(!images.empty() || !captureFinish) {
-		while(images.empty() && !captureFinish)
+		long stitch_start = clock();
+		while(images.empty() && !captureFinish) {
+			cout << "wanglingyusima" << endl;
 			Sleep(100);
+		}
 		FrameInfo frame_info = images.front();
 		images.pop();
 		frame_info.stitch_status = video_stitcher.StitchFrame(frame_info.src, frame_info.dst);
-		while(pyramidImages[0].size() >= 10)
-			Sleep(100);
-		for(int i = 0; i < LAYERS; i++) {
-			pyramidImages[i].push(frame_info.dst);
-			resize(frame_info.dst, frame_info.dst, Size(), RESIZERATIO, RESIZERATIO);
+		if(writeVideo) {
+			while(pyramidImages[0].size() >= 10)
+				Sleep(100);
+			for(int i = 0; i < LAYERS; i++) {
+				pyramidImages[i].push(frame_info.dst);
+				resize(frame_info.dst, frame_info.dst, Size(), RESIZERATIO, RESIZERATIO);
+			}
 		}
+		long stitch_end = clock();
+		int frame_time = stitch_end - stitch_start;
+		cout << frame_time << endl;
+		int key = waitKey(std::max(1, (int)(frame_show_interval - frame_time)));
+		if(key == 27) {	//	ESC
+			break;
+		} else if(key == 45)	{//	- 
+			show_scale += scale_interval;
+			int distanceX = centerX;
+			distanceX = min(distanceX, frame_info.dst.cols-centerX);
+			int distanceY = centerY;
+			distanceY = min(distanceY, frame_info.dst.rows-centerY);
+			if((frame_info.dst.cols * show_scale) / 2 > distanceX || (frame_info.dst.rows * show_scale) / 2 > distanceY) {
+				show_scale -= scale_interval;
+				continue;
+			} else {
+				windowWidth = frame_info.dst.cols * show_scale;
+				windowHeight = frame_info.dst.rows * show_scale;
+				moveX = windowWidth / 10;
+				moveY = windowHeight / 10;
+			}
+		}
+		else if(key == 61 || key == 43) {			//	+
+			if(show_scale >= scale_interval) {
+				show_scale -= scale_interval;
+				windowWidth = frame_info.dst.cols * show_scale;
+				windowHeight = frame_info.dst.rows * show_scale;
+				moveX = windowWidth / 10;
+				moveY = windowHeight / 10;
+			}
+		} else if(key == 65 || key == 97) {  //a
+			centerX = max(windowWidth / 2, centerX - moveX);
+		} else if(key == 87 || key == 119) {  //w
+			centerY = max(windowHeight / 2, centerY - moveY);
+		} else if(key == 83 || key == 115) {   //s
+			centerY = min(frame_info.dst.rows - windowHeight / 2 - 1, centerY + moveY);
+		} else if(key == 68 || key == 100) {    //d
+			centerX = min(frame_info.dst.cols - windowWidth / 2 - 1, centerX + moveX);
+		} else if(key == 81 || key == 113) {    //q
+			windowWidth = frame_info.dst.cols;
+			windowHeight = frame_info.dst.rows;
+			showWidth = windowWidth / 5;
+			showHeight = windowHeight / 5;
+			centerX = frame_info.dst.cols / 2;
+			centerY = frame_info.dst.rows / 2;
+			moveX = windowWidth / 10;
+			moveY = windowHeight / 10;
+		}
+		Mat show_dst;
+		Rect roi = Rect(centerX - windowWidth / 2, centerY - windowHeight / 2, windowWidth, windowHeight);
+		cv::resize(frame_info.dst(roi), show_dst, Size(showWidth, showHeight));
+		imshow(window_name, show_dst);
 	}
-	for(int i = 0; i < LAYERS; i++)
-		stitchFinish[i] = true;
+	if(writeVideo) {
+		for(int i = 0; i < LAYERS; i++)
+			stitchFinish[i] = true;
+	}
 	return 0;
 }
 
@@ -137,6 +212,7 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 	//	Debug用信息
 	bool is_save_input_frames = false;
 	bool is_save_output_frames = true;
+	writeVideo = is_save_video_;
 
 	double fps = captures[0].get(CV_CAP_PROP_FPS);
 
@@ -204,12 +280,13 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 
 	cout << "Stitching..." << endl;
 
-	string window_name = "视频拼接";
-	if(is_preview_)
-		namedWindow(window_name);
+	//string window_name = "视频拼接";
+	//if(is_preview_)
+	//	namedWindow(window_name);
 	double show_scale = 1.0, scale_interval = 0.03;
-	int frame_show_interval = cvFloor(1000 / fps);
-	
+	int origin_frame_show_interval = cvFloor(1000 / fps);
+	frame_show_interval = origin_frame_show_interval;
+
 	int failed_frame_count = 0;
 
 	char log_string[1000];
@@ -223,6 +300,12 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 		log_file.open(debug_dir_path_ + log_file_name);
 	
 	long startTime = clock();
+	windowWidth = dst.cols;
+	windowHeight = dst.rows;
+	showWidth = windowWidth / 5;
+	showHeight = windowHeight / 5;
+	centerX = windowWidth / 2;
+	centerY = windowHeight / 2;
 	HANDLE hCapture = CreateThread(NULL, 0, captureFrame, (LPVOID)&captures, 0, NULL);
 	HANDLE hStitch = CreateThread(NULL, 0, stitchFrame, NULL, 0, NULL);
 	HANDLE* hWrite = new HANDLE[LAYERS];
