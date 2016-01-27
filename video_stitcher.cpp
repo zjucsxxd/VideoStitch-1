@@ -206,7 +206,7 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 		}
 		cout << endl;
 
-		//	ÏÔÊ¾
+		//	ÏÔÊ¾---
 		if(is_preview_)
 		{
 			int key = waitKey(std::max(1, (int)(frame_show_interval - frame_time)));
