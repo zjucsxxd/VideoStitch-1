@@ -38,7 +38,7 @@ using namespace cv::detail;
 /************************************************************************/
 
 #define RESIZERATIO (1.0 / 2)
-#define LAYERS 3
+#define LAYERS 2
 #define BLOCKWIDTH 640
 #define BLOCKHEIGHT 320
 

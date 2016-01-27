@@ -1418,7 +1418,7 @@ void MyVideoStitcher::prePareWrite(int videoHeight, int videoWidth, VideoCapture
 	memset(stitchFinish, 0, sizeof(bool) * LAYERS);
 
 	assert(videoHeight * pow(RESIZERATIO, LAYERS-1) >= BLOCKHEIGHT);
-	assert(videoWidth * pow(RESIZERATIO, LAYERS - 1) >= BLOCKWIDTH);
+	assert(videoWidth * pow(RESIZERATIO, LAYERS-1) >= BLOCKWIDTH);
 	
 	FILE* fp = fopen(recordFilePath.c_str(), "w");
 	videoNames.resize(LAYERS);
