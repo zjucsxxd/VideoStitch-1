@@ -33,6 +33,14 @@ using namespace cv::detail;
 #define STITCH_CONFIG_ERROR	-1
 #define STITCH_NOISE		-2
 
+/************************************************************************/
+/*                       segment parameters                             */
+/************************************************************************/
+
+#define RESIZERATIO (1.0 / 2)
+#define LAYERS 3
+#define BLOCKWIDTH 640
+#define BLOCKHEIGHT 320
 
 typedef float* float_ptr;
 
@@ -51,6 +59,13 @@ public:
 protected:
 private:
 };
+
+typedef struct segmentWriter
+{
+	VideoWriter** writer;
+	int height;
+	int width;
+}segmentWriter;
 
 
 class MyVideoStitcher
@@ -88,6 +103,7 @@ protected:
 
 private:
 	int Prepare(vector<Mat> &src);
+	void prePareWrite(int videoHeight, int videoWidth, VideoCapture cap);
 	int PrepareAPAP(vector<Mat> &src);
 	int PrepareClassical(vector<Mat> &src);
 	int StitchFrameCPU(vector<Mat> &src, Mat &dst);
@@ -213,6 +229,9 @@ private:
 
 	/* Debug */
 	string debug_dir_path_;
+
+	vector<vector<string>> videoNames;
+	string recordFilePath;
 };
 
 

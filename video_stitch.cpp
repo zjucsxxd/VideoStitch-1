@@ -204,10 +204,7 @@ static int VideoStitch(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
-	long start_clock = clock();
 	VideoStitch(argc, argv);
-	long end_clock = clock();
-	cout << "time " << end_clock - start_clock << endl;
 	system("pause");
 	return 0;
 }

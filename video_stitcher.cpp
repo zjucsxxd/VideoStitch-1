@@ -36,7 +36,7 @@ MyVideoStitcher::MyVideoStitcher()
 	warp_type_ = "cylindrical";//"plane";//"apap";//"paniniA2B1";//"transverseMercator";//"spherical";//
 	expos_comp_type_ = ExposureCompensator::GAIN_BLOCKS;//ExposureCompensator::GAIN;//
 	match_conf_ = 0.3f;
-	seam_find_type_ = "gc_color";//"voronoi";//
+	seam_find_type_ = "voronoi";//"voronoi";//
 	blend_type_ = Blender::FEATHER;//Blender::MULTI_BAND;//Blender::NO;//
 	blend_strength_ = 5;
 
@@ -44,13 +44,16 @@ MyVideoStitcher::MyVideoStitcher()
 	SYSTEM_INFO sys_info;
 	GetSystemInfo(&sys_info);
 	parallel_num_ = sys_info.dwNumberOfProcessors;
+
+	recordFilePath = "record.txt";
 }
 
-VideoWriter writer;
 queue<FrameInfo> images;
-queue<Mat> ans;
 bool captureFinish = false;
-bool stitchFinish = false;
+bool* stitchFinish;
+segmentWriter* pyramidVideoWriter;
+
+vector<queue<Mat>> pyramidImages;
 
 DWORD WINAPI captureFrame(LPVOID lpParameter) {
 	vector<VideoCapture> captures = *(vector<VideoCapture>*)lpParameter;
@@ -79,29 +82,49 @@ DWORD WINAPI captureFrame(LPVOID lpParameter) {
 }
 
 DWORD WINAPI stitchFrame(LPVOID lpParameter) {
+	pyramidImages.resize(LAYERS);
 	while(!images.empty() || !captureFinish) {
 		while(images.empty() && !captureFinish)
 			Sleep(100);
 		FrameInfo frame_info = images.front();
 		images.pop();
 		frame_info.stitch_status = video_stitcher.StitchFrame(frame_info.src, frame_info.dst);
-		while(ans.size() >= 10)
+		while(pyramidImages[0].size() >= 10)
 			Sleep(100);
-		ans.push(frame_info.dst);
+		for(int i = 0; i < LAYERS; i++) {
+			pyramidImages[i].push(frame_info.dst);
+			resize(frame_info.dst, frame_info.dst, Size(), RESIZERATIO, RESIZERATIO);
+		}
 	}
-	stitchFinish = true;
+	for(int i = 0; i < LAYERS; i++)
+		stitchFinish[i] = true;
 	return 0;
 }
 
 DWORD WINAPI writeFrame(LPVOID lpParameter) {
-	while(!ans.empty() || !stitchFinish) {
-		while(ans.empty() && !stitchFinish) {
+	int layer = (int)lpParameter;
+	while(!stitchFinish[layer] || !pyramidImages[layer].empty()) {
+		while(!stitchFinish[layer] && pyramidImages[layer].empty()) {
 			Sleep(100);
 		}
-		Mat cur = ans.front();
-		ans.pop();
-		writer.write(cur);
-	}	
+		Mat img = pyramidImages[layer].front();
+		pyramidImages[layer].pop();
+		for(int i = 0; i < pyramidVideoWriter[layer].height; i++) {
+			for(int j = 0; j < pyramidVideoWriter[layer].width; j++) {
+				int yStart = i * BLOCKHEIGHT;
+				int yEnd = min(((i+1) * BLOCKHEIGHT), img.rows);
+				int xStart = j * BLOCKWIDTH;
+				int xEnd = min(((j+1)*BLOCKWIDTH), img.cols);
+				Rect roi(xStart, yStart, xEnd - xStart, yEnd - yStart);
+				Mat tmp;
+				img(roi).copyTo(tmp);
+				pyramidVideoWriter[layer].writer[i][j].write(tmp);
+			}
+		}
+	}
+	for(int i = 0; i < pyramidVideoWriter[layer].height; i++)
+		for(int j = 0; j < pyramidVideoWriter[layer].width; j++)
+			pyramidVideoWriter[layer].writer[i][j].release();
 	return 0;
 }
 
@@ -171,14 +194,6 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 		imwrite(debug_dir_path_ + "/mask.jpg", dst_mask);
 	}
 
-	// 创建结果视频
-	if(is_save_video_)
-	{
-		writer.open(writer_file_name, CV_FOURCC('D', 'I','V', '3'), 20, Size(dst.cols, dst.rows));
-		writer.write(dst);
-	}
-
-
 	// 开始拼接
 	double stitch_time = 0;
 
@@ -206,94 +221,25 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 	ofstream log_file;
 	if(is_debug_)
 		log_file.open(debug_dir_path_ + log_file_name);
-	/*
-	while(true)
-	{
-		long frame_time = 0;
-		//	采集
-		long cap_start_clock = clock();
-		int j;
-		for(j = 0; j < video_num; j++)
-		{
-			if( !captures[j].read(frame))
-				break;
-			frame.copyTo(frame_info.src[j]);
-		}
-		frame_info.frame_idx = frameidx;
-		frameidx++;
-		if(j != video_num || (end_frame_index_ >= 0 && frameidx >= end_frame_index_))	//有一个视频源结束，则停止拼接
-			break;
-
-		//	拼接
-		long stitch_start_clock = clock();
-		frame_info.stitch_status = StitchFrame(frame_info.src, frame_info.dst);
-		long stitch_clock = clock();
-		sprintf(log_string, "\tframe %d: stitch(%dms), capture(%dms)", 
-			frame_info.frame_idx, stitch_clock - stitch_start_clock, stitch_start_clock - cap_start_clock);
-		printf("%s", log_string);
-		if(is_debug_)
-			log_file << log_string << endl;
-		stitch_time += stitch_clock - stitch_start_clock;
-		frame_time += stitch_clock - cap_start_clock;
-
-		//	拼接失败
-		if(frame_info.stitch_status != 0)
-		{
-			cout << "failed\n";
-			if(is_debug_)
-				log_file << "failed" << endl;
-			failed_frame_count++;
-			break;
-		}
-
-		//	保存视频
-		if(is_save_video_)
-		{
-			cout << ", write(";
-			if(is_save_output_frames)
-			{
-				char img_save_name[100];
-				sprintf(img_save_name, "/images/%d.jpg", frame_info.frame_idx);
-				imwrite(debug_dir_path_ + img_save_name, frame_info.dst);
-			}
-			long write_start_clock = clock();
-			writer.write(frame_info.dst);
-			
-			long write_clock = clock();
-			cout << write_clock - write_start_clock << "ms)";
-			frame_time += write_clock - write_start_clock;
-		}
-		cout << endl;
-
-		//	显示
-		if(is_preview_)
-		{
-			int key = waitKey(std::max(1, (int)(frame_show_interval - frame_time)));
-			if(key == 27)	//	ESC
-				break;
-			else if(key == 61 || key == 43)	//	+
-				show_scale += scale_interval;
-			else if(key == 45)				//	-
-				if(show_scale >= scale_interval)
-					show_scale -= scale_interval;
-			resize(frame_info.dst, show_dst, Size(show_scale * dst.cols, show_scale * dst.rows));
-			imshow(window_name, show_dst);
-		}
-	}
-	*/
+	
+	long startTime = clock();
 	HANDLE hCapture = CreateThread(NULL, 0, captureFrame, (LPVOID)&captures, 0, NULL);
 	HANDLE hStitch = CreateThread(NULL, 0, stitchFrame, NULL, 0, NULL);
-	HANDLE hWrite;
+	HANDLE* hWrite = new HANDLE[LAYERS];
 	if(is_save_video_) {
-		hWrite = CreateThread(NULL,0, writeFrame, NULL, 0, NULL);
+		prePareWrite(dst.rows, dst.cols, captures[0]);
+		for(int i = 0; i < LAYERS; i++) {
+			hWrite[i] = CreateThread(NULL, 0, writeFrame, (LPVOID)i, 0, NULL);
+		}
 	}
-	//CloseHandle(hCapture);
-	//CloseHandle(hStitch);
 	WaitForSingleObject(hCapture, INFINITE);
 	WaitForSingleObject(hStitch, INFINITE);
-	if(is_save_video_)
-		WaitForSingleObject(hWrite, INFINITE);
+	if(is_save_video_) {
+		WaitForMultipleObjects(LAYERS, hWrite, false, INFINITE);
+	}
 	
+	long endTime = clock();
+	cout << "test " << endTime - startTime << endl;
 	cout << "\nStitch over" << endl;
 	cout << failed_frame_count << " frames failed." << endl;
 	cout << "\tfull view angle is " << cvRound(view_angle_) << "°" << endl;
@@ -1465,4 +1411,54 @@ int MyVideoStitcher::loadCameraParam( string filename )
 		cameras_.push_back(cp);
 	}
 	return 0;
+}
+
+void MyVideoStitcher::prePareWrite(int videoHeight, int videoWidth, VideoCapture cap) {
+	stitchFinish = new bool[LAYERS];
+	memset(stitchFinish, 0, sizeof(bool) * LAYERS);
+
+	assert(videoHeight * pow(RESIZERATIO, LAYERS-1) >= BLOCKHEIGHT);
+	assert(videoWidth * pow(RESIZERATIO, LAYERS - 1) >= BLOCKWIDTH);
+	
+	FILE* fp = fopen(recordFilePath.c_str(), "w");
+	videoNames.resize(LAYERS);
+	pyramidVideoWriter = new segmentWriter[LAYERS];
+	fprintf(fp, "%d\n", LAYERS);
+	fprintf(fp, "%d %d\n", BLOCKHEIGHT, BLOCKWIDTH);
+
+	for(int i = 0; i < LAYERS; i++) {
+		int nHeights = (videoHeight + BLOCKHEIGHT - 1) / BLOCKHEIGHT;
+		int nWidths = (videoWidth + BLOCKWIDTH - 1) / BLOCKWIDTH;
+
+		pyramidVideoWriter[i].height = nHeights;
+		pyramidVideoWriter[i].width = nWidths;
+		pyramidVideoWriter[i].writer = new VideoWriter*[nHeights];
+		fprintf(fp, "%d %d %d %d\n", nHeights, nWidths, videoHeight, videoWidth);
+
+		for(int j = 0; j < nHeights; j++) {
+			pyramidVideoWriter[i].writer[j] = new VideoWriter[nWidths];
+			for(int k = 0; k < nWidths; k++) {
+				char fileName[100];
+				sprintf(fileName, "%d_%d_%d.avi", i, j, k);
+				videoNames[i].push_back(string(fileName));
+				int segWidth = BLOCKWIDTH;
+				int segHeight = BLOCKHEIGHT;
+				if(j == nHeights - 1) {
+					segHeight = videoHeight - (j * BLOCKHEIGHT);
+				}
+				if(k == nWidths - 1) {
+					segWidth = videoWidth - (k * BLOCKWIDTH);
+				}
+				pyramidVideoWriter[i].writer[j][k].open(fileName, CV_FOURCC('D', 'I','V', '3'), (int)cap.get(CV_CAP_PROP_FPS), Size(segWidth, segHeight));
+				fprintf(fp, "%s ", fileName);
+			}
+			fprintf(fp, "\n");
+		}
+		fprintf(fp, "\n");
+		videoHeight = videoHeight * RESIZERATIO;
+		videoWidth = videoWidth * RESIZERATIO;
+	}
+
+	fclose(fp);
+	cout << "Prepare write finish" << endl;
 }
