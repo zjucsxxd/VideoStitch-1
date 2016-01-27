@@ -163,8 +163,8 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 	centerY = dst.rows / 2;
 	windowWidth = dst.cols;
 	windowHeight = dst.rows;
-	showWidth = dst.cols * 0.5;
-	showHeight = dst.rows * 0.5;
+	showWidth = dst.cols / 5;
+	showHeight = dst.rows / 5;
 	moveX = windowWidth / 10;
 	moveY = windowHeight / 10;
 
@@ -218,7 +218,7 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 				imwrite(debug_dir_path_ + img_save_name, frame_info.dst);
 			}
 			long write_start_clock = clock();
-			writer.write(frame_info.dst);
+			//writer.write(frame_info.dst);
 			long write_clock = clock();
 			cout << write_clock - write_start_clock << "ms)";
 			frame_time += write_clock - write_start_clock;
@@ -234,14 +234,13 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 			} else if(key == 45)	{//	- 
 				show_scale += scale_interval;
 				int distanceX = centerX;
-				distanceX = max(distanceX, dst.cols-centerX);
+				distanceX = min(distanceX, dst.cols-centerX);
 				int distanceY = centerY;
-				distanceY = max(distanceY, dst.rows-centerY);
-				if(windowWidth / 2 * show_scale > distanceX || windowHeight / 2 * show_scale > distanceY) {
+				distanceY = min(distanceY, dst.rows-centerY);
+				if((dst.cols * show_scale) / 2 > distanceX || (dst.rows * show_scale) / 2 > distanceY) {
 					show_scale -= scale_interval;
 					continue;
-				}
-				else {
+				} else {
 					windowWidth = dst.cols * show_scale;
 					windowHeight = dst.rows * show_scale;
 					moveX = windowWidth / 10;
@@ -263,6 +262,15 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 				centerY = min(dst.rows - windowHeight / 2 - 1, centerY + moveY);
 			} else if(key == 68 || key == 100) {    //d
 				centerX = min(dst.cols - windowWidth / 2 - 1, centerX + moveX);
+			} else if(key == 81 || key == 113) {    //q
+				windowWidth = dst.cols;
+				windowHeight = dst.rows;
+				showWidth = windowWidth / 5;
+				showHeight = windowHeight / 5;
+				centerX = dst.cols / 2;
+				centerY = dst.rows / 2;
+				moveX = windowWidth / 10;
+				moveY = windowHeight / 10;
 			}
 			Rect roi = Rect(centerX - windowWidth / 2, centerY - windowHeight / 2, windowWidth, windowHeight);
 			resize(frame_info.dst(roi), show_dst, Size(showWidth, showHeight));
