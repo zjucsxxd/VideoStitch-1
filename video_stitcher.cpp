@@ -46,6 +46,15 @@ MyVideoStitcher::MyVideoStitcher()
 	parallel_num_ = sys_info.dwNumberOfProcessors;
 }
 
+int centerX = 0;
+int centerY = 0;
+int windowWidth = 0;
+int windowHeight = 0;
+int showWidth = 0;
+int showHeight = 0;
+int moveX = 0;
+int moveY = 0;
+
 int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file_name )
 {
 	int video_num = captures.size();
@@ -149,6 +158,16 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 	if(is_debug_)
 		log_file.open(debug_dir_path_ + log_file_name);
 	long long startTime = clock();
+
+	centerX = dst.cols / 2;
+	centerY = dst.rows / 2;
+	windowWidth = dst.cols;
+	windowHeight = dst.rows;
+	showWidth = dst.cols * 0.5;
+	showHeight = dst.rows * 0.5;
+	moveX = windowWidth / 10;
+	moveY = windowHeight / 10;
+
 	while(true)
 	{
 		long frame_time = 0;
@@ -210,14 +229,43 @@ int MyVideoStitcher::stitch( vector<VideoCapture> &captures, string &writer_file
 		if(is_preview_)
 		{
 			int key = waitKey(std::max(1, (int)(frame_show_interval - frame_time)));
-			if(key == 27)	//	ESC
+			if(key == 27) {	//	ESC
 				break;
-			else if(key == 61 || key == 43)	//	+
+			} else if(key == 45)	{//	- 
 				show_scale += scale_interval;
-			else if(key == 45)				//	-
-				if(show_scale >= scale_interval)
+				int distanceX = centerX;
+				distanceX = max(distanceX, dst.cols-centerX);
+				int distanceY = centerY;
+				distanceY = max(distanceY, dst.rows-centerY);
+				if(windowWidth / 2 * show_scale > distanceX || windowHeight / 2 * show_scale > distanceY) {
 					show_scale -= scale_interval;
-			resize(frame_info.dst, show_dst, Size(show_scale * dst.cols, show_scale * dst.rows));
+					continue;
+				}
+				else {
+					windowWidth = dst.cols * show_scale;
+					windowHeight = dst.rows * show_scale;
+					moveX = windowWidth / 10;
+					moveY = windowHeight / 10;
+				}
+			} else if(key == 61 || key == 43) {			//	+
+				if(show_scale >= scale_interval) {
+					show_scale -= scale_interval;
+					windowWidth = dst.cols * show_scale;
+					windowHeight = dst.rows * show_scale;
+					moveX = windowWidth / 10;
+					moveY = windowHeight / 10;
+				}
+			} else if(key == 65 || key == 97) {  //a
+				centerX = max(windowWidth / 2, centerX - moveX);
+			} else if(key == 87 || key == 119) {  //w
+				centerY = max(windowHeight / 2, centerY - moveY);
+			} else if(key == 83 || key == 115) {   //s
+				centerY = min(dst.rows - windowHeight / 2 - 1, centerY + moveY);
+			} else if(key == 68 || key == 100) {    //d
+				centerX = min(dst.cols - windowWidth / 2 - 1, centerX + moveX);
+			}
+			Rect roi = Rect(centerX - windowWidth / 2, centerY - windowHeight / 2, windowWidth, windowHeight);
+			resize(frame_info.dst(roi), show_dst, Size(showWidth, showHeight));
 			imshow(window_name, show_dst);
 		}
 	}
